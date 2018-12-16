@@ -1,0 +1,480 @@
+---
+title: "rml2183 Final Project - Genomic Information"
+output: html_notebook
+---
+
+```{r}
+# Load libraries and install if necessary using function in class notes
+
+#' @param package_name name of the package
+#' @param bioclite TRUE if the package belongs to bioconductor
+#'
+LoadLibOrInstall <- function(package_name, bioclite=FALSE){
+  if (!require(package_name, character.only = TRUE)) {
+    if (bioclite) {
+      source("http://bioconductor.org/biocLite.R")
+      biocLite(package_name)
+    } else {
+      install.packages(package_name, character.only = TRUE)
+    }
+    require(package_name, character.only = TRUE)
+  }
+}
+
+LoadLibOrInstall("corrplot")
+LoadLibOrInstall("data.table")
+LoadLibOrInstall("DiagrammeR")
+LoadLibOrInstall("FactoMineR")
+LoadLibOrInstall("httr")
+LoadLibOrInstall("limma", bioclite=TRUE)
+LoadLibOrInstall("edgeR", bioclite=TRUE)
+LoadLibOrInstall("GEOquery", bioclite=TRUE)
+LoadLibOrInstall("simpleaffy", bioclite=TRUE)
+LoadLibOrInstall("RColorBrewer")
+LoadLibOrInstall("affyPLM", bioclite = TRUE)
+LoadLibOrInstall("gridExtra")
+LoadLibOrInstall("RankProd", bioclite = TRUE)
+LoadLibOrInstall("gplots")
+
+#set up color palettes
+
+cols <- brewer.pal(8, "Set1")
+redblackgreen <- colorRampPalette(c("green", "black", "red"))(n = 100)
+```
+
+```{r}
+#import GEO files for the four datasets used in the paper in question
+
+getGEOSuppFiles("GSE26511")
+untar("GSE26511/GSE26511_RAW.tar", exdir="data_2")
+cels_2 <- list.files("data_2/", pattern = "[gz]")
+sapply(paste("data_2", cels_2, sep="/"), gunzip)
+
+getGEOSuppFiles("GSE5787")
+untar("GSE5787/GSE5787_RAW.tar", exdir="data_5")
+cels_5 <- list.files("data_5/", pattern = "[gz]")
+sapply(paste("data_5", cels_5, sep="/"), gunzip)
+
+getGEOSuppFiles("GSE63514")
+untar("GSE63514/GSE63514_RAW.tar", exdir="data_6")
+cels_6 <- list.files("data_6/", pattern = "[gz]")
+sapply(paste("data_6", cels_6, sep="/"), gunzip)
+
+getGEOSuppFiles("GSE9750")
+untar("GSE9750/GSE9750_RAW.tar", exdir="data_9")
+cels_9 <- list.files("data_9/", pattern = "[gz]")
+sapply(paste("data_9", cels_9, sep="/"), gunzip)
+```
+
+#Stage 1: LIMMA
+
+Following this step, I used the terminal (ls data/*.CEL > data/phenodata.txt) and GEO data to create a phenotype file for each set of samples with three columns for use in simple affy: Nmae, FileName, and Target. 
+
+##Standardize Genesets
+```{r}
+#read in the first geneset (GSE26511) and normalize with RMA
+celfiles_2 <- read.affy(covdesc="phenodata.txt", path="data_2")
+celfiles_2_rma <- rma(celfiles_2)
+```
+
+```{r}
+#plot a density vs log intensity histogram for the unnormalized vs normalized data
+par(mfrow=c(1,2))
+hist(celfiles_2, col=cols)
+hist(celfiles_2_rma, col=cols)
+```
+
+```{r}
+#filter for null or no variance in order to run limma
+celfiles_2_filtered <- nsFilter(celfiles_2_rma, require.entrez=FALSE, remove.dupEntrez=FALSE)
+celfiles_2_filtered$filter.log
+```
+
+```{r}
+#read in the second geneset (GSE5787) and normalize with RMA
+celfiles_5 <- read.affy(covdesc="phenodata.txt", path="data_5")
+celfiles_5_rma <- rma(celfiles_5)
+```
+
+```{r}
+#plot a density vs log intensity histogram for the unnormalized vs normalized data
+par(mfrow=c(1,2))
+hist(celfiles_5, col=cols)
+hist(celfiles_5_rma, col=cols)
+```
+
+```{r}
+#filter for null or no variance in order to run limma
+celfiles_5_filtered <- nsFilter(celfiles_5_rma, require.entrez=FALSE, remove.dupEntrez=FALSE)
+celfiles_5_filtered$filter.log
+```
+
+```{r}
+#read in the third geneset (GSE63514) and normalize with RMA
+celfiles_6 <- read.affy(covdesc="phenodata.txt", path="data_6")
+celfiles_6_rma <- rma(celfiles_6)
+```
+
+
+```{r}
+#plot a density vs log intensity histogram for the unnormalized vs normalized data
+par(mfrow=c(1,2))
+hist(celfiles_6, col=cols)
+hist(celfiles_6_rma, col=cols)
+```
+
+```{r}
+#filter for null or no variance in order to run limma
+celfiles_6_filtered <- nsFilter(celfiles_6_rma, require.entrez=FALSE, remove.dupEntrez=FALSE)
+celfiles_6_filtered$filter.log
+```
+
+```{r}
+#read in the last geneset (GSE9750) and normalize with RMA
+celfiles_9 <- read.affy(covdesc="phenodata.txt", path="data_9")
+celfiles_9_rma <- rma(celfiles_9)
+```
+
+```{r}
+#plot a density vs log intensity histogram for the unnormalized vs normalized data
+par(mfrow=c(1,2))
+hist(celfiles_9, col=cols)
+hist(celfiles_9_rma, col=cols)
+```
+
+```{r}
+#filter for null or no variance in order to run limma
+celfiles_9_filtered <- nsFilter(celfiles_9_rma, require.entrez=FALSE, remove.dupEntrez=FALSE)
+celfiles_9_filtered$filter.log
+```
+##GSE26511 LIMMA
+```{r}
+#read in sample targets (negative or positive lymph node status)
+samples_2 <- celfiles_2_rma$Target
+samples_2 <- as.factor(samples_2)
+
+#create design and contrast matrix for limma
+design_2 <- model.matrix(~0 + samples_2)
+colnames(design_2) <- levels(samples_2)
+cont_matrix_2 <- makeContrasts(NegvsPos = positive-negative, levels=design_2)
+
+#run and fit limma
+fit_2 <- lmFit(exprs(celfiles_2_filtered$eset), design_2)
+fit_2 <- contrasts.fit(fit_2, cont_matrix_2)
+fit_2 <- eBayes(fit_2)
+
+#save the top 10,000 differentially expressed genes
+top_2 <- topTable(fit_2, number = 10000)
+```
+
+##GSE5787 LIMMA
+```{r}
+#read in sample targets (biopsy 1-6 of cervical cancer patients)
+samples_5 <- celfiles_5_rma$Target
+samples_5 <- as.factor(samples_5)
+
+#used to create combinations of GSE5787 levels for analysis in contrast matrix
+comb <- combn(levels(samples_5), 2)
+comb_5 <- character()
+
+#create all combinations of 2 biopsy levels
+for (val in 1:42) {
+  if (val%%2 !=0) {
+    x <- paste(comb[val],comb[val+1],sep="-")
+    comb_5 <- append(comb_5,noquote(x))
+  }
+}
+
+#create design for limma
+design_5 <- model.matrix(~0 + samples_5)
+colnames(design_5) <- levels(samples_5)
+
+#create contrast matrix (several different matrices tried using combinations below)
+#cont_matrix_5 <- makeContrasts(biopsy1-biopsy2,biopsy1-biopsy3,biopsy1-biopsy4,biopsy1-biopsy5,biopsy1-biopsy6,biopsy1-biopsy7,biopsy2-biopsy3,biopsy2-biopsy4,biopsy2-biopsy5,biopsy2-biopsy6,biopsy2-biopsy7,biopsy3-biopsy4,biopsy3-biopsy5,biopsy3-biopsy6,biopsy3-biopsy7,biopsy4-biopsy5,biopsy4-biopsy6,biopsy4-biopsy7,biopsy5-biopsy6,biopsy5-biopsy7,biopsy6-biopsy7, levels=design_5)
+cont_matrix_5 <- makeContrasts(biopsy1-(biopsy2+biopsy3+biopsy4+biopsy5+biopsy6+biopsy7)/6, levels=design_5)
+
+#run and fit limma
+fit_5 <- lmFit(exprs(celfiles_5_filtered$eset), design_5)
+fit_5 <- contrasts.fit(fit_5, cont_matrix_5)
+fit_5 <- eBayes(fit_5)
+
+#save the top 10,000 differentially expressed genes
+top_5 <- topTable(fit_5, number = 10000)
+```
+
+##GSE63514 LIMMA
+```{r}
+#read in sample targets (cancer, CIN1 lesion, CIN2 lesion, CIN3 lesion, normal)
+samples_6 <- celfiles_6_rma$Target
+samples_6 <- as.factor(samples_6)
+
+#create design and contrast matrix for limma
+design_6 <- model.matrix(~0 + samples_6)
+colnames(design_6) <- levels(samples_6)
+cont_matrix_6 <- makeContrasts(cancer-(cin1+cin2+cin3+normal)/4, levels=design_6)
+
+#run and fit limma
+fit_6 <- lmFit(exprs(celfiles_6_filtered$eset), design_6)
+fit_6 <- contrasts.fit(fit_6, cont_matrix_6)
+fit_6 <- eBayes(fit_6)
+
+#save the top 10,000 differentially expressed genes
+top_6 <- topTable(fit_6, number = 10000)
+```
+
+##GSE9750 LIMMA
+```{r}
+#read in sample targets (cancer, celline, normal)
+samples_9 <- celfiles_9_rma$Target
+samples_9 <- as.factor(samples_9)
+
+#create design and contrast matrix for limma
+design_9 <- model.matrix(~0 + samples_9)
+colnames(design_9) <- levels(samples_9)
+cont_matrix_9 <- makeContrasts(cancer-(cellline+normal)/2, levels=design_9)
+
+#run and fit limma
+fit_9 <- lmFit(exprs(celfiles_9_filtered$eset), design_9)
+fit_9 <- contrasts.fit(fit_9, cont_matrix_9)
+fit_9 <- eBayes(fit_9)
+
+#save the top 10,000 differentially expressed genes
+top_9 <- topTable(fit_9, number = 10000)
+```
+
+##Export Results of LIMMA 
+```{r}
+write.csv(top_9, file="GSE9 Top 10000.csv")
+write.csv(top_6, file="GSE6 Top 10000.csv")
+write.csv(top_5, file="GSE5 Top 10000.csv")
+write.csv(top_2, file="GSE2 Top 10000.csv")
+```
+
+#Stage 2: RankProd Analysis
+
+Due to issues with replicating the results of the LIMMA analysis, an intersection process for my results was found to produce almost entirely different gene sets from those found in the paper. Therefore, the meta-analysis gene expression set in Appendix S2 was used for this analysis in addition to the results of my LIMMA analysis.  
+
+##RankProd Analysis using Appendix S2
+```{r}
+#read in table and create lists of samples and genes
+meta <- read.table("meta_analysis_set.csv",sep=",",row.names=1,header=TRUE)
+samples <- colnames(meta)
+genes <- rownames(meta)
+
+#create vector of 1s as all samples are cancer
+c_meta <- rep(1, length(colnames(meta)))
+
+#run RankProd analysis 
+rp_orig <- RankProducts(meta,c_meta, gene.names = rownames(meta), logged=FALSE)
+
+#save differentially expressed genes with a cut off of a 0.05 p-value
+tg_orig <- topGene(rp_orig,cutoff=0.05,method="pval")
+
+#create tables of upregulated and downregulated genes
+upreg_orig <- tg_orig$Table1
+downreg_orig <- tg_orig$Table2
+
+#plot pfp
+plotRP(rp_orig, cutoff=0.05)
+```
+
+##RankProd Analysis using Geneset from Appendix S2 and Results of my LIMMA Analysis
+```{r}
+#create matrix of gene expressions by sample from all genesets
+#filter to include only genes and samples in Appendix S2
+repset_2 <- exprs(celfiles_2_filtered$eset)
+repset_2 <- as.data.frame(repset_2)
+colnames(repset_2) <- gsub(".CEL","",colnames(repset_2))
+repset_2 <- repset_2[rownames(repset_2) %in% genes, colnames(repset_2) %in% samples]
+
+repset_5 <- exprs(celfiles_5_filtered$eset)
+repset_5 <- as.data.frame(repset_5)
+colnames(repset_5) <- gsub(".CEL","",colnames(repset_5))
+repset_5 <- repset_5[rownames(repset_5) %in% genes, colnames(repset_5) %in% samples]
+
+repset_6 <- exprs(celfiles_6_filtered$eset)
+repset_6 <- as.data.frame(repset_6)
+colnames(repset_6) <- gsub(".CEL","",colnames(repset_6))
+colnames(repset_6) <- gsub("-",".",colnames(repset_6))
+repset_6 <- repset_6[rownames(repset_6) %in% genes, colnames(repset_6) %in% samples]
+
+repset_9 <- exprs(celfiles_9_filtered$eset)
+repset_9 <- as.data.frame(repset_9)
+colnames(repset_9) <- gsub(".CEL","",colnames(repset_9))
+repset_9 <- repset_9[rownames(repset_9) %in% genes, colnames(repset_9) %in% samples]
+
+#merge matrices for all genesets into single matrix
+meta_rep <- transform(merge(repset_2,repset_5,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_rep <- transform(merge(meta_rep,repset_6,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_rep <- transform(merge(meta_rep,repset_9,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+
+#create vector of 1s as all samples are cancer
+c_meta_rep <- rep(1, length(colnames(meta_rep)))
+
+#run RankProd analysis
+rp_rep <- RankProducts(meta_rep,c_meta_rep, gene.names = rownames(meta_rep))
+
+#save differentially expressed genes with a cut off of a 0.05 p-value
+tg_rep <- topGene(rp_rep,cutoff=0.05,method="pval")
+
+#create tables of upregulated and downregulated genes
+upreg_rep <- tg_rep$Table1
+downreg_rep <- tg_rep$Table2
+
+#plot pfp
+plotRP(rp_rep, cutoff=0.05)
+```
+
+##RankProd Analysis using Geneset Found in my LIMMA Analysis
+```{r}
+#create vector of intersected genes between all four LIMMA top 10,000 genesets
+foundgenes <- intersect(rownames(top_2),rownames(top_9))
+foundgenes <- intersect(foundgenes, rownames(top_6))
+foundgenes <- intersect(foundgenes, rownames(top_5))
+
+#find genes overlapping between this analysis and those found in the original paper
+overlap <- intersect(foundgenes, genes)
+
+#too large a set for permutations performed by RankProd
+#random selection performed due to variation in performance across genesets, three overlapping genes with the original paper included
+foundgenes <- c(sample(foundgenes, 97),overlap)
+
+#create matrix of gene expressions by sample from all genesets
+#filter to include only genes in foundgenes list and samples=cancer 
+set_2 <- exprs(celfiles_2_filtered$eset)
+set_2 <- as.data.frame(set_2)
+colnames(set_2) <- gsub(".CEL","",colnames(set_2))
+set_2 <- set_2[rownames(set_2) %in% foundgenes, colnames(set_2) %in% samples]
+
+set_5 <- exprs(celfiles_5_filtered$eset)
+set_5 <- as.data.frame(set_5)
+colnames(set_5) <- gsub(".CEL","",colnames(set_5))
+set_5 <- set_5[rownames(set_5) %in% foundgenes, colnames(set_5) %in% samples]
+
+set_6 <- exprs(celfiles_6_filtered$eset)
+set_6 <- as.data.frame(set_6)
+colnames(set_6) <- gsub(".CEL","",colnames(set_6))
+colnames(set_6) <- gsub("-",".",colnames(set_6))
+set_6 <- set_6[rownames(set_6) %in% foundgenes, colnames(set_6) %in% samples]
+
+set_9 <- exprs(celfiles_9_filtered$eset)
+set_9 <- as.data.frame(set_9)
+colnames(set_9) <- gsub(".CEL","",colnames(set_9))
+set_9 <- set_9[rownames(set_9) %in% foundgenes, colnames(set_9) %in% samples]
+
+#merge matrices for all genesets into single matrix
+meta_found <- transform(merge(set_2,set_5,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_found <- transform(merge(meta_found,set_6,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_found <- transform(merge(meta_found,set_9,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+
+#create vector of 1s as all samples are cancer
+c_meta_found <- rep(1, length(colnames(meta_found)))
+
+#run RankProd analysis
+rp_found <- RankProducts(meta_found,c_meta_found, gene.names = rownames(meta_found))
+
+#save differentially expressed genes with a cut off of a 0.05 p-value
+tg_found <- topGene(rp_found,cutoff=0.05, method="pval")
+
+#create tables of upregulated and downregulated genes
+upreg_found <- tg_found$Table1
+downreg_found <- tg_found$Table2
+
+#plot pfp
+plotRP(rp_found, cutoff=0.05)
+```
+
+##Export Results of RankProd
+```{r}
+write.csv(upreg_orig, "Upregulated_Original.csv")
+write.csv(upreg_rep, "Upregulated_Replicated.csv")
+write.csv(upreg_found, "Upregulated_Found.csv")
+write.csv(downreg_orig, "Downregulated_Original.csv")
+write.csv(downreg_rep, "Downregulated_Replicated.csv")
+write.csv(downreg_found, "Downregulated_Found.csv")
+```
+
+#Stage 3: Feature Selection and Machine Learning
+Due to low quality documentation of approaches in the paper and time spent attempting to duplicate LIMMA and RankProd analysis, I chose to focus on hierachical clustering. Additionally, as it was necessary to randomly select from the geneset found in my analysis, this was excluded from this step.
+
+##Hierarchical Clustering
+```{r}
+#analysis for genes found in paper using my expression values as the normal values were not available in the appendices
+
+#list genes upregulated and downregulated in RankProd analysis
+genes <- c(rownames(tg_orig$Table1),rownames(tg_orig$Table2))
+
+#obtain gene expression values for all genesets, filter to include only up and down regulated genes
+mlset_2 <- exprs(celfiles_2_filtered$eset)
+mlset_2 <- as.data.frame(mlset_2)
+colnames(mlset_2) <- gsub(".CEL","",colnames(mlset_2))
+mlset_2 <- mlset_2[rownames(mlset_2) %in% genes, ]
+
+mlset_5 <- exprs(celfiles_5_filtered$eset)
+mlset_5 <- as.data.frame(mlset_5)
+colnames(mlset_5) <- gsub(".CEL","",colnames(mlset_5))
+mlset_5 <- mlset_5[rownames(mlset_5) %in% genes, ]
+
+mlset_6 <- exprs(celfiles_6_filtered$eset)
+mlset_6 <- as.data.frame(mlset_6)
+colnames(mlset_6) <- gsub(".CEL","",colnames(mlset_6))
+colnames(mlset_6) <- gsub("-",".",colnames(mlset_6))
+mlset_6 <- mlset_6[rownames(mlset_6) %in% genes, ]
+
+mlset_9 <- exprs(celfiles_9_filtered$eset)
+mlset_9 <- as.data.frame(mlset_9)
+colnames(mlset_9) <- gsub(".CEL","",colnames(mlset_9))
+mlset_9 <- mlset_9[rownames(mlset_9) %in% genes, ]
+
+#merge genesets filtered above
+meta_ml <- transform(merge(mlset_2,mlset_5,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_ml <- transform(merge(meta_ml,mlset_6,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+meta_ml <- transform(merge(meta_ml,mlset_9,by=0,all=TRUE), row.names=Row.names, Row.names=NULL)
+
+#transform na's to 0's for hierarchical clustering visualization
+meta_ml[is.na(meta_ml)] <- 0
+
+#create separate lists of up and down regulated genes
+up_genes <- rownames(tg_orig$Table1)
+down_genes <- rownames(tg_orig$Table2)
+
+#normalize expression set by quantiles
+meta_ml_norm <- as.data.frame(normalize.quantiles(as.matrix(meta_ml), copy=FALSE))
+
+#create separate expression sets for normalized data
+meta_ml_norm_up <- meta_ml_norm[rownames(meta_ml_norm) %in% up_genes, ]
+meta_ml_norm_down <- meta_ml_norm[rownames(meta_ml_norm) %in% down_genes, ]
+```
+
+```{r}
+#clustering of upregulated genes (nnormalized)
+heatmap.2(as.matrix(meta_ml_norm_up), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
+```
+
+```{r}
+#clustering of downregulated genes (normalized)
+heatmap.2(as.matrix(meta_ml_norm_down), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
+```
+
+```{r}
+#perform hierarchical clustering on normalized expression set for upregulated genes
+hc_up <- hclust(dist(meta_ml_norm_up, "maximum"))
+plot(hc_up)
+```
+
+```{r}
+#cut tree to a height of 1.5 as in paper for upregulated genes
+cutree(hc_up, h=max(hc_up$height)-1.5)
+```
+
+```{r}
+#perform hierarchical clustering on normalized expression set for downregulated genes
+hc_down <- hclust(dist(meta_ml_norm_down, "maximum"))
+plot(hc_down)
+```
+
+```{r}
+#cut tree to a height of 1.5 as in paper for downregulated genes
+cutree(hc_down, h=max(hc_down$height)-1.5)
+```
+
