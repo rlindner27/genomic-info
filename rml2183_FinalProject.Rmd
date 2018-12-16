@@ -438,27 +438,24 @@ meta_ml[is.na(meta_ml)] <- 0
 up_genes <- rownames(tg_orig$Table1)
 down_genes <- rownames(tg_orig$Table2)
 
-#normalize expression set by quantiles
-meta_ml_norm <- as.data.frame(normalize.quantiles(as.matrix(meta_ml), copy=FALSE))
-
-#create separate expression sets for normalized data
-meta_ml_norm_up <- meta_ml_norm[rownames(meta_ml_norm) %in% up_genes, ]
-meta_ml_norm_down <- meta_ml_norm[rownames(meta_ml_norm) %in% down_genes, ]
+#create separate expression sets for data
+meta_ml_up <- meta_ml[rownames(meta_ml) %in% up_genes, ]
+meta_ml_down <- meta_ml[rownames(meta_ml) %in% down_genes, ]
 ```
 
 ```{r}
-#clustering of upregulated genes (nnormalized)
-heatmap.2(as.matrix(meta_ml_norm_up), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
+#clustering of upregulated genes
+heatmap.2(as.matrix(meta_ml_up), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
 ```
 
 ```{r}
-#clustering of downregulated genes (normalized)
-heatmap.2(as.matrix(meta_ml_norm_down), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
+#clustering of downregulated genes
+heatmap.2(as.matrix(meta_ml_down), scale = "row", col = redblackgreen, trace="none", density.info = "none", distfun = function(x) dist(x,method = 'maximum'))
 ```
 
 ```{r}
-#perform hierarchical clustering on normalized expression set for upregulated genes
-hc_up <- hclust(dist(meta_ml_norm_up, "maximum"))
+#perform hierarchical clustering on expression set for upregulated genes
+hc_up <- hclust(dist(meta_ml_up, "maximum"))
 plot(hc_up)
 ```
 
@@ -468,8 +465,8 @@ cutree(hc_up, h=max(hc_up$height)-1.5)
 ```
 
 ```{r}
-#perform hierarchical clustering on normalized expression set for downregulated genes
-hc_down <- hclust(dist(meta_ml_norm_down, "maximum"))
+#perform hierarchical clustering on expression set for downregulated genes
+hc_down <- hclust(dist(meta_ml_down, "maximum"))
 plot(hc_down)
 ```
 
